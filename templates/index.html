@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>IDP Оператор | Проверка первички 1С</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans h-screen flex flex-col" x-data="documentReviewer()">
+    <header class="bg-slate-800 text-white px-6 py-3 flex justify-between items-center shadow">
+        <div class="flex items-center space-x-4">
+            <h1 class="text-xl font-bold">IDP Агент 1С</h1>
+            <span class="bg-blue-600 text-xs px-2.5 py-1 rounded-full uppercase font-semibold">Депо & Датафилд</span>
+        </div>
+        <div class="flex items-center space-x-3">
+            <a href="/api/export/excel" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-4 py-2 rounded shadow text-sm">
+                📊 Скачать Excel Таблицу
+            </a>
+            <button @click="approveAndSend()" class="bg-green-600 hover:bg-green-500 text-white font-medium px-4 py-2 rounded shadow text-sm">
+                Подтвердить и записать в 1С
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden">
+        <section class="w-1/2 bg-gray-900 p-4 flex justify-center items-center relative">
+            <div class="text-white text-center">
+                <p class="text-lg font-semibold">Скан-источник</p>
+                <p class="text-sm text-gray-400 mt-2">Предпросмотр первички PDF / ТТН</p>
+            </div>
+        </section>
+
+        <section class="w-1/2 bg-white flex flex-col overflow-y-auto p-6">
+            <div class="mb-6 bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                <label class="block text-sm font-bold text-blue-900 mb-1">Глобальное назначение документа:</label>
+                <div class="flex space-x-4">
+                    <label class="flex items-center space-x-2">
+                        <input type="radio" value="for_resale" x-model="doc.global_intent" @change="applyGlobalIntent()">
+                        <span class="text-sm">Реализация (Перепродажа)</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="radio" value="internal_use" x-model="doc.global_intent" @change="applyGlobalIntent()">
+                        <span class="text-sm">Внутренние нужды</span>
+                    </label>
+                </div>
+            </div>
+
+            <table class="w-full text-left text-xs text-gray-600 border">
+                <thead class="bg-gray-100 uppercase text-[10px]">
+                    <tr>
+                        <th class="p-3">#</th>
+                        <th class="p-3">Наименование</th>
+                        <th class="p-3">Сумма</th>
+                        <th class="p-3">Назначение</th>
+                        <th class="p-3">Счет учета</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    <template x-for="(item, index) in doc.items" :key="index">
+                        <tr class="hover:bg-gray-50">
+                            <td class="p-3" x-text="index + 1"></td>
+                            <td class="p-3 font-semibold" x-text="item.name"></td>
+                            <td class="p-3" x-text="item.total_amount"></td>
+                            <td class="p-3">
+                                <select x-model="item.intent" @change="onItemIntentChange(item)" class="border rounded px-2 py-1">
+                                    <option value="for_resale">Реализация</option>
+                                    <option value="internal_use">Вн. нужды</option>
+                                </select>
+                            </td>
+                            <td class="p-3">
+                                <select x-model="item.account" class="border rounded px-2 py-1 font-bold text-blue-700">
+                                    <option value="41.01">41.01 (Товары)</option>
+                                    <option value="10.01">10.01 (Материалы)</option>
+                                    <option value="26">26 (Общехоз. расходы)</option>
+                                </select>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        function documentReviewer() {
+            return {
+                doc: {
+                    number: "УПД-452",
+                    global_intent: "internal_use",
+                    items: [
+                        { name: "Вода питьевая 19л", quantity: 5, price: 350, total_amount: 1750, intent: "internal_use", account: "26" },
+                        { name: "Сервер DDR4 RAM 32GB", quantity: 1, price: 14500, total_amount: 14500, intent: "for_resale", account: "41.01" }
+                    ]
+                },
+                onItemIntentChange(item) {
+                    item.account = (item.intent === 'for_resale') ? '41.01' : '26';
+                },
+                applyGlobalIntent() {
+                    this.doc.items.forEach(item => {
+                        item.intent = this.doc.global_intent;
+                        this.onItemIntentChange(item);
+                    });
+                },
+                async approveAndSend() {
+                    const res = await fetch('/api/documents/approve', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            document_id: this.doc.number,
+                            global_intent: this.doc.global_intent,
+                            items: this.doc.items
+                        })
+                    });
+                    const data = await res.json();
+                    alert(data.message);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

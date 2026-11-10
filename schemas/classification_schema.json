@@ -1,0 +1,26 @@
+{
+  "name": "document_classification",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {
+        "type": "string",
+        "enum": ["torg12", "upd", "ttn", "act", "receipt", "unknown"]
+      },
+      "confidence": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "signal": {
+        "type": "string"
+      },
+      "multiple_documents_detected": {
+        "type": "boolean"
+      }
+    },
+    "required": ["document_type", "confidence", "signal", "multiple_documents_detected"],
+    "additionalProperties": false
+  }
+}

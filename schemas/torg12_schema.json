@@ -1,0 +1,79 @@
+{
+  "name": "torg12_extraction",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "document_number": {"type": ["string", "null"]},
+      "document_date": {"type": ["string", "null"]},
+      "document_number_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+      "document_date_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+      "seller": {
+        "type": "object",
+        "properties": {
+          "name": {"type": ["string", "null"]},
+          "inn": {"type": ["string", "null"]},
+          "kpp": {"type": ["string", "null"]},
+          "address": {"type": ["string", "null"]},
+          "confidence": {"type": "integer", "minimum": 0, "maximum": 100}
+        },
+        "required": ["name", "inn", "kpp", "address", "confidence"],
+        "additionalProperties": false
+      },
+      "buyer": {
+        "type": "object",
+        "properties": {
+          "name": {"type": ["string", "null"]},
+          "inn": {"type": ["string", "null"]},
+          "kpp": {"type": ["string", "null"]},
+          "address": {"type": ["string", "null"]},
+          "confidence": {"type": "integer", "minimum": 0, "maximum": 100}
+        },
+        "required": ["name", "inn", "kpp", "address", "confidence"],
+        "additionalProperties": false
+      },
+      "lines": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "line_number": {"type": "integer"},
+            "name": {"type": ["string", "null"]},
+            "unit": {"type": ["string", "null"]},
+            "qty": {"type": ["number", "null"]},
+            "price": {"type": ["number", "null"]},
+            "amount": {"type": ["number", "null"]},
+            "vat_rate": {"type": ["number", "null"]},
+            "vat_amount": {"type": ["number", "null"]},
+            "amount_with_vat": {"type": ["number", "null"]},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 100}
+          },
+          "required": ["line_number", "name", "unit", "qty", "price", "amount", "vat_rate", "vat_amount", "amount_with_vat", "confidence"],
+          "additionalProperties": false
+        }
+      },
+      "totals": {
+        "type": "object",
+        "properties": {
+          "amount_no_vat": {"type": ["number", "null"]},
+          "vat_amount": {"type": ["number", "null"]},
+          "amount_with_vat": {"type": ["number", "null"]},
+          "confidence": {"type": "integer", "minimum": 0, "maximum": 100}
+        },
+        "required": ["amount_no_vat", "vat_amount", "amount_with_vat", "confidence"],
+        "additionalProperties": false
+      },
+      "totals_mismatch": {"type": "boolean"},
+      "overall_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+      "recognition_issues": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    },
+    "required": [
+      "document_number", "document_date", "document_number_confidence", "document_date_confidence",
+      "seller", "buyer", "lines", "totals", "totals_mismatch", "overall_confidence", "recognition_issues"
+    ],
+    "additionalProperties": false
+  }
+}

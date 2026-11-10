@@ -1,0 +1,5 @@
+﻿accounting_agent.db
+learning_memory.db
+__pycache__/
+.venv/
+.env
