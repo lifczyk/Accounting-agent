@@ -4,14 +4,21 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from typing import List, Optional
 import os
+import io
+import re
 import httpx
 import shutil
+
+# Импорты для работы с Google Drive API
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaIoBaseDownload
 
 from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting IDP Operator Interface", version="1.0.0")
+app = FastAPI(title="Accounting Agent", version="1.1.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -23,12 +30,12 @@ UPLOAD_DIR = "/tmp/accounting_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "depot2026")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Berlin2015!")
 SESSION_COOKIE_NAME = "session_token"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "google/gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("OPENROUTER_MODEL_EXTRACT", "google/gemini-2.5-flash-lite")
 
 class ItemCorrection(BaseModel):
     line_number: int
@@ -52,6 +59,54 @@ def verify_session(request: Request):
             headers={"Location": "/login"}
         )
     return True
+
+def get_drive_service():
+    sa_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
+    if os.path.exists(sa_file):
+        try:
+            creds = service_account.Credentials.from_service_account_file(
+                sa_file, scopes=["https://www.googleapis.com/auth/drive.readonly"]
+            )
+            return build("drive", "v3", credentials=creds)
+        except Exception as e:
+            print(f"Ошибка Google Drive API: {e}")
+    return None
+
+def fetch_files_from_drive_folder(folder_url_or_id: str) -> list:
+    """Скачивает все файлы из папки Google Диска в UPLOAD_DIR."""
+    downloaded_files = []
+    service = get_drive_service()
+    if not service:
+        return downloaded_files
+
+    # Извлекаем ID папки из ссылки
+    match = re.search(r'folders/([a-zA-Z0-9_-]+)', folder_url_or_id)
+    folder_id = match.group(1) if match else folder_url_or_id.strip()
+
+    try:
+        query = f"'{folder_id}' in parents and trashed = false"
+        results = service.files().list(q=query, pageSize=50, fields="files(id, name, mimeType)").execute()
+        items = results.get('files', [])
+
+        for item in items:
+            if item['mimeType'] == 'application/vnd.google-apps.folder':
+                continue
+            file_id = item['id']
+            file_name = item['name']
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+            
+            request = service.files().get_media(fileId=file_id)
+            with open(file_path, 'wb') as fh:
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+            
+            downloaded_files.append({"name": file_name, "path": file_path})
+    except Exception as e:
+        print(f"Ошибка скачивания из папки Drive: {e}")
+
+    return downloaded_files
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -82,65 +137,73 @@ async def process_documents(
     files: List[UploadFile] = File(None),
     _ = Depends(verify_session)
 ):
-    extracted_text = ""
+    all_docs = []
 
+    # 1. Загрузка папки с Google Диска
     if gdrive_link and gdrive_link.strip():
-        extracted_text += f"\n[Источник: Google Диск]\nСсылка: {gdrive_link.strip()}\n"
+        drive_files = fetch_files_from_drive_folder(gdrive_link)
+        all_docs.extend(drive_files)
 
+    # 2. Загрузка файлов с локального ПК
     if files:
         for file in files:
             if file.filename:
                 file_path = os.path.join(UPLOAD_DIR, file.filename)
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
-                extracted_text += f"\n[Источник: Файл с ПК]\nИмя файла: {file.filename}\n"
+                all_docs.append({"name": file.filename, "path": file_path})
 
-    ai_response_text = "Документы не переданы или отсутствует OPENROUTER_API_KEY."
+    batch_results = []
 
-    if OPENROUTER_API_KEY and extracted_text.strip():
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://aa.depot.by",
-            "X-Title": "Accounting Agent",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": GEMINI_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Ты профессиональный бухгалтерский ассистент. Проанализируй данные первичных документов."
-                },
-                {
-                    "role": "user",
-                    "content": f"Вот данные первичных документов для распознавания:\n{extracted_text}"
-                }
-            ]
-        }
+    # 3. Потоковая обработка каждого документа в пачке
+    for doc in all_docs:
+        file_name = doc["name"]
+        ai_response_text = "Ошибка распознавания."
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    ai_response_text = res_json["choices"][0]["message"]["content"]
-                else:
-                    ai_response_text = f"Ошибка OpenRouter API ({response.status_code}): {response.text}"
-            except Exception as e:
-                ai_response_text = f"Ошибка подключения к OpenRouter: {str(e)}"
+        if OPENROUTER_API_KEY:
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": "https://aa.depot.by",
+                "X-Title": "Accounting Agent",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": GEMINI_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Ты профессиональный бухгалтерский агент. Извлеки из накладной данные в формате JSON или структурированного отчета: поставщик, дата, номер, список позиций (наименование, кол-во, цена, сумма, счет учета)."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Проанализируй накладную: {file_name}"
+                    }
+                ]
+            }
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                try:
+                    response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        ai_response_text = res_json["choices"][0]["message"]["content"]
+                    else:
+                        ai_response_text = f"Ошибка API ({response.status_code}): {response.text}"
+                except Exception as e:
+                    ai_response_text = f"Ошибка сети: {str(e)}"
+
+        batch_results.append({
+            "filename": file_name,
+            "status": "Требует проверки",
+            "result": ai_response_text
+        })
 
     return templates.TemplateResponse(request, "result.html", {
-        "result": ai_response_text,
-        "source_info": extracted_text
+        "batch_results": batch_results,
+        "total_processed": len(batch_results)
     })
 
 @app.get("/api/export/excel")
 async def export_excel(_ = Depends(verify_session)):
     filepath = export_processed_documents_to_excel()
     return FileResponse(filepath, filename=filepath, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-@app.post("/api/documents/approve")
-async def approve_document(payload: DocumentApprovalPayload, _ = Depends(verify_session)):
-    for item in payload.items:
-        learning_db.save_correction(item.name, item.intent, item.account)
-    return {"status": "success", "message": "Документ записан, ИИ обучен на правилах оператора"}
