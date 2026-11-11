@@ -16,10 +16,11 @@
     </nav>
 
     <div class="container-fluid px-4">
-        <div class="card shadow-sm mb-4">
-            Результатов обработано в сессии: <strong>{{ total_processed }}</strong>
+        <div class="card shadow-sm mb-4 p-3">
+            Результатов обработано в сессии: <strong>{{ total_processed | default(0) }}</strong>
         </div>
 
+        {% if batch_results and batch_results | length > 0 %}
         <div class="row">
             {% for doc in batch_results %}
             <div class="col-md-12 mb-4">
@@ -45,9 +46,14 @@
                         </div>
                     </div>
                 </div>
-                {% endfor %}
             </div>
+            {% endfor %}
         </div>
+        {% else %}
+        <div class="alert alert-info shadow-sm" role="alert">
+            <strong>Нет документов для отображения.</strong> Пожалуйста, <a href="/" class="alert-link">вернитесь на главную страницу</a>, укажите корректную ссылку на папку Google Диска или загрузите файлы вручную.
+        </div>
+        {% endif %}
     </div>
 </body>
 </html>
