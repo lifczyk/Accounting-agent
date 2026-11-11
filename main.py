@@ -8,18 +8,19 @@ import io
 import re
 import httpx
 import shutil
+import base64
 
-# Импорты для Google Drive API и чтения PDF
+# Импорты для Google Drive API и работы с PDF/изображениями
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
-from pypdf import PdfReader
+import fitz  # PyMuPDF для конвертации PDF в картинки
 
 from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="1.3.2")
+app = FastAPI(title="Accounting Agent", version="1.4.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -164,25 +165,45 @@ async def process_documents(
         file_path = doc["path"]
         ai_response_text = "Ошибка распознавания."
 
-        file_content_snippet = ""
+        # Формируем мультимодальный контент для OpenRouter
+        content_parts = [
+            {
+                "type": "text",
+                "text": f"Проанализируй эту накладную из файла '{file_name}'. Извлеки данные: поставщик, дата, номер, список позиций (наименование, кол-во, цена, сумма, счет учета)."
+            }
+        ]
+
         try:
-            if file_path.endswith('.txt') or file_path.endswith('.csv'):
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    file_content_snippet = f.read()
-            elif file_path.endswith('.pdf'):
-                reader = PdfReader(file_path)
-                pdf_text = []
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        pdf_text.append(text)
-                file_content_snippet = "\n".join(pdf_text)
-                if not file_content_snippet.strip():
-                    file_content_snippet = f"PDF файл {file_name} содержит изображения."
+            if file_path.endswith('.pdf'):
+                # Конвертируем страницы PDF в изображения через PyMuPDF (fitz)
+                doc_pdf = fitz.open(file_path)
+                for page_num in range(len(doc_pdf)):
+                    page = doc_pdf[page_num]
+                    pix = page.get_pixmap(dpi=150)  # Качественный рендер
+                    img_bytes = pix.tobytes("jpeg")
+                    encoded_img = base64.b64encode(img_bytes).decode('utf-8')
+                    
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded_img}"
+                        }
+                    })
+            elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                with open(file_path, "rb") as img_file:
+                    encoded_img = base64.b64encode(img_file.read()).decode('utf-8')
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded_img}"
+                        }
+                    })
             else:
-                file_content_snippet = f"Файл документа: {file_name}"
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    text_content = f.read()
+                    content_parts[0]["text"] += f"\n\nСодержимое:\n{text_content}"
         except Exception as e:
-            file_content_snippet = f"Не удалось прочитать файл: {e}"
+            content_parts[0]["text"] += f"\n\nНе удалось прочитать файл как мультимодальный: {e}"
 
         if OPENROUTER_API_KEY:
             headers = {
@@ -196,16 +217,16 @@ async def process_documents(
                 "messages": [
                     {
                         "role": "system",
-                        "content": "Ты профессиональный бухгалтерский агент. Извлеки из накладной данные в формате JSON или структурированного отчета: поставщик, дата, номер, список позиций (наименование, кол-во, цена, сумма, счет учета)."
+                        "content": "Ты профессиональный бухгалтерский агент. Извлекай из накладных структурированные данные (поставщик, дата, номер, позиции, счета)."
                     },
                     {
                         "role": "user",
-                        "content": f"Проанализируй накладную из файла '{file_name}':\n{file_content_snippet}"
+                        "content": content_parts
                     }
                 ]
             }
 
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 try:
                     response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
                     if response.status_code == 200:
