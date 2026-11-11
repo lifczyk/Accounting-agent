@@ -1,5 +1,5 @@
-﻿from fastapi import FastAPI, Depends, Form, HTTPException, Request, status, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, Depends, Form, HTTPException, Request, status, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from typing import List, Optional
@@ -16,25 +16,19 @@ app = FastAPI(title="Accounting IDP Operator Interface", version="1.0.0")
 store = DocumentStore()
 learning_db = LearningDatabase()
 
-# Директории
 os.makedirs("templates", exist_ok=True)
 templates = Jinja2Templates(directory="templates")
 
 UPLOAD_DIR = "/tmp/accounting_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Учетные данные для формы входа (можно перенести в .env)
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "depot2026")
 SESSION_COOKIE_NAME = "session_token"
 
-# Настройки OpenRouter и Gemini Flash
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "google/gemini-2.5-flash")
-
-
-# --- Модели Pydantic для утверждения документов ---
 
 class ItemCorrection(BaseModel):
     line_number: int
@@ -50,9 +44,6 @@ class DocumentApprovalPayload(BaseModel):
     global_intent: str
     items: List[ItemCorrection]
 
-
-# --- Вспомогательная функция проверки авторизации ---
-
 def verify_session(request: Request):
     session = request.cookies.get(SESSION_COOKIE_NAME)
     if session != "authenticated":
@@ -62,12 +53,9 @@ def verify_session(request: Request):
         )
     return True
 
-
-# --- Роуты авторизации ---
-
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html", {})
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -75,7 +63,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
         response.set_cookie(key=SESSION_COOKIE_NAME, value="authenticated", httponly=True, max_age=86400)
         return response
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный логин или пароль"})
+    return templates.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль"})
 
 @app.get("/logout")
 async def logout():
@@ -83,12 +71,9 @@ async def logout():
     response.delete_cookie(SESSION_COOKIE_NAME)
     return response
 
-
-# --- Главный экран и обработка файлов ---
-
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, _ = Depends(verify_session)):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html", {})
 
 @app.post("/process-documents", response_class=HTMLResponse)
 async def process_documents(
@@ -99,11 +84,9 @@ async def process_documents(
 ):
     extracted_text = ""
 
-    # 1. Обработка ссылки на Google Диск
     if gdrive_link and gdrive_link.strip():
         extracted_text += f"\n[Источник: Google Диск]\nСсылка: {gdrive_link.strip()}\n"
 
-    # 2. Обработка файлов, загруженных с ПК
     if files:
         for file in files:
             if file.filename:
@@ -112,7 +95,6 @@ async def process_documents(
                     shutil.copyfileobj(file.file, buffer)
                 extracted_text += f"\n[Источник: Файл с ПК]\nИмя файла: {file.filename}\n"
 
-    # 3. Отправка в OpenRouter (Gemini Flash)
     ai_response_text = "Документы не переданы или отсутствует OPENROUTER_API_KEY."
 
     if OPENROUTER_API_KEY and extracted_text.strip():
@@ -127,7 +109,7 @@ async def process_documents(
             "messages": [
                 {
                     "role": "system",
-                    "content": "Ты профессиональный бухгалтерский ассистент. Проанализируй данные первичных документов и извлеки табличную часть и реквизиты."
+                    "content": "Ты профессиональный бухгалтерский ассистент. Проанализируй данные первичных документов."
                 },
                 {
                     "role": "user",
@@ -147,27 +129,18 @@ async def process_documents(
             except Exception as e:
                 ai_response_text = f"Ошибка подключения к OpenRouter: {str(e)}"
 
-    return templates.TemplateResponse("result.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "result.html", {
         "result": ai_response_text,
         "source_info": extracted_text
     })
 
-
-# --- API Эндпоинты проекта ---
-
 @app.get("/api/export/excel")
 async def export_excel(_ = Depends(verify_session)):
     filepath = export_processed_documents_to_excel()
-    return FileResponse(
-        filepath, 
-        filename=filepath, 
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    return FileResponse(filepath, filename=filepath, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 @app.post("/api/documents/approve")
 async def approve_document(payload: DocumentApprovalPayload, _ = Depends(verify_session)):
     for item in payload.items:
         learning_db.save_correction(item.name, item.intent, item.account)
     return {"status": "success", "message": "Документ записан, ИИ обучен на правилах оператора"}
-
