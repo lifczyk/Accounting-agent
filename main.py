@@ -9,16 +9,17 @@ import re
 import httpx
 import shutil
 
-# Импорты для работы с Google Drive API
+# Импорты для Google Drive API и чтения PDF
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
+from pypdf import PdfReader
 
 from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="1.3.1")
+app = FastAPI(title="Accounting Agent", version="1.3.2")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -73,11 +74,10 @@ def get_drive_service():
     return None
 
 def fetch_files_from_drive_folder(folder_url_or_id: str) -> list:
-    """Скачивает все файлы из папки Google Диска в UPLOAD_DIR с поддержкой общих папок."""
     downloaded_files = []
     service = get_drive_service()
     if not service:
-        print("Google Drive service не инициализирован (проверьте service_account.json).")
+        print("Google Drive service не инициализирован.")
         return downloaded_files
 
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', folder_url_or_id)
@@ -169,6 +169,16 @@ async def process_documents(
             if file_path.endswith('.txt') or file_path.endswith('.csv'):
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     file_content_snippet = f.read()
+            elif file_path.endswith('.pdf'):
+                reader = PdfReader(file_path)
+                pdf_text = []
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        pdf_text.append(text)
+                file_content_snippet = "\n".join(pdf_text)
+                if not file_content_snippet.strip():
+                    file_content_snippet = f"PDF файл {file_name} содержит изображения."
             else:
                 file_content_snippet = f"Файл документа: {file_name}"
         except Exception as e:
