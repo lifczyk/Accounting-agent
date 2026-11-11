@@ -18,7 +18,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="1.1.0")
+app = FastAPI(title="Accounting Agent", version="1.2.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -73,19 +73,26 @@ def get_drive_service():
     return None
 
 def fetch_files_from_drive_folder(folder_url_or_id: str) -> list:
-    """Скачивает все файлы из папки Google Диска в UPLOAD_DIR."""
+    """Скачивает все файлы из папки Google Диска в UPLOAD_DIR с поддержкой общих папок."""
     downloaded_files = []
     service = get_drive_service()
     if not service:
+        print("Google Drive service не инициализирован (проверьте service_account.json).")
         return downloaded_files
 
-    # Извлекаем ID папки из ссылки
+    # Извлекаем ID папки из ссылки или используем переданный ID
     match = re.search(r'folders/([a-zA-Z0-9_-]+)', folder_url_or_id)
     folder_id = match.group(1) if match else folder_url_or_id.strip()
 
     try:
         query = f"'{folder_id}' in parents and trashed = false"
-        results = service.files().list(q=query, pageSize=50, fields="files(id, name, mimeType)").execute()
+        results = service.files().list(
+            q=query,
+            pageSize=50,
+            fields="files(id, name, mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
         items = results.get('files', [])
 
         for item in items:
@@ -104,7 +111,7 @@ def fetch_files_from_drive_folder(folder_url_or_id: str) -> list:
             
             downloaded_files.append({"name": file_name, "path": file_path})
     except Exception as e:
-        print(f"Ошибка скачивания из папки Drive: {e}")
+        print(f"Ошибка скачивания из папки Google Drive: {e}")
 
     return downloaded_files
 
@@ -139,7 +146,7 @@ async def process_documents(
 ):
     all_docs = []
 
-    # 1. Загрузка папки с Google Диска
+    # 1. Загрузка папки с Google Диска (если указана ссылка)
     if gdrive_link and gdrive_link.strip():
         drive_files = fetch_files_from_drive_folder(gdrive_link)
         all_docs.extend(drive_files)
@@ -148,62 +155,4 @@ async def process_documents(
     if files:
         for file in files:
             if file.filename:
-                file_path = os.path.join(UPLOAD_DIR, file.filename)
-                with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-                all_docs.append({"name": file.filename, "path": file_path})
-
-    batch_results = []
-
-    # 3. Потоковая обработка каждого документа в пачке
-    for doc in all_docs:
-        file_name = doc["name"]
-        ai_response_text = "Ошибка распознавания."
-
-        if OPENROUTER_API_KEY:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "HTTP-Referer": "https://aa.depot.by",
-                "X-Title": "Accounting Agent",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": GEMINI_MODEL,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "Ты профессиональный бухгалтерский агент. Извлеки из накладной данные в формате JSON или структурированного отчета: поставщик, дата, номер, список позиций (наименование, кол-во, цена, сумма, счет учета)."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Проанализируй накладную: {file_name}"
-                    }
-                ]
-            }
-
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                try:
-                    response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
-                    if response.status_code == 200:
-                        res_json = response.json()
-                        ai_response_text = res_json["choices"][0]["message"]["content"]
-                    else:
-                        ai_response_text = f"Ошибка API ({response.status_code}): {response.text}"
-                except Exception as e:
-                    ai_response_text = f"Ошибка сети: {str(e)}"
-
-        batch_results.append({
-            "filename": file_name,
-            "status": "Требует проверки",
-            "result": ai_response_text
-        })
-
-    return templates.TemplateResponse(request, "result.html", {
-        "batch_results": batch_results,
-        "total_processed": len(batch_results)
-    })
-
-@app.get("/api/export/excel")
-async def export_excel(_ = Depends(verify_session)):
-    filepath = export_processed_documents_to_excel()
-    return FileResponse(filepath, filename=filepath, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                file_path =
