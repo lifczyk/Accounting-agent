@@ -2,24 +2,51 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Результат анализа | IDP Агент</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Реестр распознанных накладных — Accounting Agent</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans p-6">
-    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow p-6">
-        <div class="flex justify-between items-center mb-6 border-b pb-4">
-            <h1 class="text-xl font-bold text-slate-800">Результат анализа документов (Gemini Flash)</h1>
-            <a href="/" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm">← Назад к загрузке</a>
-        </div>
-
-        <div class="mb-4">
-            <h3 class="text-sm font-semibold text-gray-500 uppercase mb-2">Переданные источники:</h3>
-            <pre class="bg-gray-50 p-3 rounded text-xs text-gray-700 border whitespace-pre-wrap">{{ source_info }}</pre>
-        </div>
-
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-dark px-4 mb-4">
+        <span class="navbar-brand mb-0 h1">Accounting Agent — Реестр документов</span>
         <div>
-            <h3 class="text-sm font-semibold text-gray-500 uppercase mb-2">Ответ ИИ / Извлеченные данные:</h3>
-            <div class="bg-slate-900 text-emerald-400 p-4 rounded text-sm font-mono whitespace-pre-wrap">{{ result }}</div>
+            <a href="/" class="btn btn-outline-light btn-sm me-2">Загрузить еще</a>
+            <a href="/api/export/excel" class="btn btn-success btn-sm me-2">Экспорт в Excel</a>
+            <a href="/logout" class="btn btn-outline-danger btn-sm">Выход</a>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+        <div class="card shadow-sm mb-4">
+            Результатов обработано в сессии: <strong>{{ total_processed }}</strong>
+        </div>
+
+        <div class="row">
+            {% for doc in batch_results %}
+            <div class="col-md-12 mb-4">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 text-primary">📄 {{ doc.filename }}</h5>
+                        <span class="badge bg-warning text-dark">{{ doc.status }}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <pre class="bg-dark text-light p-3 rounded" style="max-height: 250px; overflow-y: auto;">{{ doc.result }}</pre>
+                            </div>
+                            <div class="col-md-4 d-flex flex-column justify-content-between">
+                                <div>
+                                    <p class="text-muted small">Проверьте корректность распознанных позиций и счетов перед выгрузкой в 1С.</p>
+                                </div>
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-success btn-sm" onclick="alert('Документ подтвержден!')">Подтвердить и в 1С</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="alert('Режим редактора открыт')">Исправить вручную</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
         </div>
     </div>
 </body>
