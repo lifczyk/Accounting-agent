@@ -20,7 +20,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="3.1.0")
+app = FastAPI(title="Accounting Agent", version="3.2.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -351,14 +351,14 @@ async def process_documents(
                         except Exception:
                             pass
 
-                    # 2. ШАГ ИЗВЛЕЧЕНИЯ ДАННЫХ (НЕЙТРАЛЬНЫЕ ПРОМПТЫ)
+                    # 2. ШАГ ИЗВЛЕЧЕНИЯ ДАННЫХ
                     if doc_type_key == "waybill":
                         prompt_text = (
                             "Ты профессиональный бухгалтерский ИИ-ассистент по первичным документам в Республике Беларусь. "
                             "Это Товарная накладная (ТН-2 / ТТН-1). Извлеки точные данные строго из текста документа в JSON:\n"
-                            "1. 'серия_накладной': ТОЛЬКО буквенная серия (две заглавные русские буквы перед номером накладной, например ЭЮ, АК, АВ). Запрещено записывать сюда цифры экземпляров вроде '2-й экз.'!\n"
+                            "1. 'серия_накладной': ТОЛЬКО буквенная серия (две заглавные русские буквы перед номером накладной, например ЭЮ, АК, АВ).\n"
                             "2. 'номер_накладной': цифровой номер документа.\n"
-                            "3. 'поставщик' (Грузоотправитель) и 'покупатель' (Грузополучатель): извлекай реальные наименования и их 9-значные УНП строго из шапки/таблички документа. Ничего не подменяй.\n"
+                            "3. 'поставщик' (Грузоотправитель) и 'покупатель' (Грузополучатель): извлекай реальные наименования и их 9-значные УНП строго из шапки/таблички документа.\n"
                             "4. 'код_формы': ищи в самом низу накладной мелким шрифтом.\n"
                             "5. В позициях обязательно заполняй поле 'единица_измерения'.\n\n"
                             "Формат JSON:\n"
@@ -437,10 +437,8 @@ async def process_documents(
             row_class = "row-error"
             badge_html = '<span class="doc-badge badge-err">● Ошибка</span>'
             status_html = f'<span class="status-err" title="{html.escape(error_tooltip)}">● {html.escape(status_label)}</span>'
-            checked_attr = ""
         else:
             row_class = "row-ready"
-            checked_attr = "checked"
             status_html = '<span class="status-ok">● Ready</span>'
             if doc_type_key == "waybill":
                 ser = parsed_data.get("серия_накладной", "")
@@ -493,20 +491,23 @@ async def process_documents(
         else:
             items_html = "<div class='text-muted-dark'>Не определено</div>"
 
-        # Назначение по умолчанию (для актов услуг обычно внутреннее потребление, для ТН — приход)
+        # Назначение по умолчанию
         default_intent = "internal" if doc_type_key == "act" else ("expense" if doc_type_key == "receipt" else "arrival")
+
+        # JSON строка для кнопки "Подробнее"
+        json_str = html.escape(json.dumps(parsed_data, ensure_ascii=False, indent=2))
 
         processed_rows.append({
             "id": index,
             "filename": file_name,
             "row_class": row_class,
-            "checked_attr": checked_attr,
             "badge_html": badge_html,
             "seller_html": seller_html,
             "buyer_html": buyer_html,
             "items_html": items_html,
             "default_intent": default_intent,
             "status_html": status_html,
+            "json_str": json_str
         })
 
     rows_html = ""
@@ -519,15 +520,16 @@ async def process_documents(
         <tr class="{r['row_class']}">
             <td class="text-center align-middle fw-bold">{r['id']}</td>
             <td class="text-center align-middle">
-                <input class="form-check-input" type="checkbox" {r['checked_attr']} style="transform: scale(1.25); cursor: pointer;">
+                <input class="form-check-input" type="checkbox" checked style="transform: scale(1.25); cursor: pointer;">
             </td>
             <td class="align-middle">
                 <div class="mb-1">{r['badge_html']}</div>
                 <div class="small text-muted-dark">{html.escape(r['filename'])}</div>
+                <button class="btn btn-sm btn-outline-dark py-0 px-2 mt-1" style="font-size: 0.75rem;" onclick='showDetails({r["json_str"]}, "{html.escape(r["filename"])}")'>🔍 Подробнее</button>
             </td>
             <td class="align-middle small">{r['seller_html']}</td>
             <td class="align-middle small">{r['buyer_html']}</td>
-            <td class="align-middle small" style="max-width: 320px; line-height: 1.35;">
+            <td class="align-middle small" style="max-width: 300px; line-height: 1.35;">
                 {r['items_html']}
             </td>
             <td class="align-middle">
@@ -646,7 +648,7 @@ async def process_documents(
                             <tr>
                                 <th class="text-center" style="width: 45px;">#</th>
                                 <th class="text-center" style="width: 55px;">ОК</th>
-                                <th style="width: 190px;">Тип документа</th>
+                                <th style="width: 210px;">Тип документа</th>
                                 <th style="width: 210px;">Продавец</th>
                                 <th style="width: 200px;">Покупатель</th>
                                 <th>Список товаров / услуг</th>
@@ -666,6 +668,35 @@ async def process_documents(
                 </div>
             </div>
         </div>
+
+        <!-- МОДАЛЬНОЕ ОКНО ДЛЯ ПРОСМОТРА ДЕТАЛЕЙ ДОКУМЕНТА -->
+        <div class="modal fade" id="detailsModal" tabindex="-1" aria-labelledby="detailsModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border border-secondary">
+              <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="detailsModalLabel">Детали документа</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+              </div>
+              <div class="modal-body">
+                <pre id="modalJsonContent" class="bg-black text-success p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 0.85rem;"></pre>
+              </div>
+              <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bootstrap JS Bundle -->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        <script>
+            function showDetails(jsonData, filename) {
+                document.getElementById('detailsModalLabel').innerText = 'Детали документа: ' + filename;
+                document.getElementById('modalJsonContent').innerText = JSON.stringify(jsonData, null, 2);
+                var myModal = new bootstrap.Modal(document.getElementById('detailsModal'));
+                myModal.show();
+            }
+        </script>
     </body>
     </html>
     """
