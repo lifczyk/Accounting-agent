@@ -20,7 +20,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="3.2.0")
+app = FastAPI(title="Accounting Agent", version="3.2.1")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -122,7 +122,6 @@ def fetch_files_from_drive_folder(folder_url_or_id: str) -> list:
 
 
 def validate_document_math(parsed_data: dict) -> list:
-    """Автоматическая проверка математических расхождений сумм и НДС"""
     errors = []
     try:
         positions = (
@@ -196,7 +195,6 @@ async def dashboard(request: Request, _=Depends(verify_session)):
             </div>
 
             <div class="row g-4">
-                <!-- ЛЕВАЯ КОЛОНКА: Источники загрузки -->
                 <div class="col-md-5">
                     <div class="card p-4 shadow-sm h-100">
                         <h5 class="text-white mb-4">📥 Источники документов</h5>
@@ -215,7 +213,6 @@ async def dashboard(request: Request, _=Depends(verify_session)):
                     </div>
                 </div>
 
-                <!-- ПРАВАЯ КОЛОНКА: Операционный дашборд -->
                 <div class="col-md-7">
                     <div class="card p-4 shadow-sm h-100">
                         <h5 class="text-white mb-4">📊 Операционный дашборд</h5>
@@ -328,7 +325,6 @@ async def process_documents(
 
             async with httpx.AsyncClient(timeout=90.0) as client:
                 try:
-                    # 1. ШАГ КЛАССИФИКАЦИИ ДОКУМЕНТА
                     class_payload = {
                         "model": GEMINI_MODEL,
                         "messages": [
@@ -351,7 +347,6 @@ async def process_documents(
                         except Exception:
                             pass
 
-                    # 2. ШАГ ИЗВЛЕЧЕНИЯ ДАННЫХ
                     if doc_type_key == "waybill":
                         prompt_text = (
                             "Ты профессиональный бухгалтерский ИИ-ассистент по первичным документам в Республике Беларусь. "
@@ -432,7 +427,6 @@ async def process_documents(
             is_valid = False
             status_label = "Нет API ключа"
 
-        # Формируем данные для отображения в строке таблицы
         if not is_valid:
             row_class = "row-error"
             badge_html = '<span class="doc-badge badge-err">● Ошибка</span>'
@@ -452,7 +446,6 @@ async def process_documents(
             else:
                 badge_html = '<span class="doc-badge badge-receipt">● Чек</span>'
 
-        # Продавец
         supplier = parsed_data.get("поставщик") or parsed_data.get("исполнитель") or parsed_data.get("продавец") or {}
         sup_name = supplier.get("наименование") or ("Ошибка" if not is_valid else "Не указан")
         sup_unp = supplier.get("унп", "")
@@ -460,7 +453,6 @@ async def process_documents(
             f"<div class='text-muted-dark small'>(УНП: {html.escape(str(sup_unp))})</div>" if sup_unp else ""
         )
 
-        # Покупатель
         customer = parsed_data.get("покупатель") or parsed_data.get("заказчик") or {}
         if isinstance(customer, str):
             cust_name, cust_unp = customer, ""
@@ -471,7 +463,6 @@ async def process_documents(
             f"<div class='text-muted-dark small'>(УНП: {html.escape(str(cust_unp))})</div>" if cust_unp else ""
         )
 
-        # Список товаров/услуг в столбик
         items = (
             parsed_data.get("позиции", [])
             or parsed_data.get("услуги_позиции", [])
@@ -491,10 +482,7 @@ async def process_documents(
         else:
             items_html = "<div class='text-muted-dark'>Не определено</div>"
 
-        # Назначение по умолчанию
         default_intent = "internal" if doc_type_key == "act" else ("expense" if doc_type_key == "receipt" else "arrival")
-
-        # JSON строка для кнопки "Подробнее"
         json_str = html.escape(json.dumps(parsed_data, ensure_ascii=False, indent=2))
 
         processed_rows.append({
@@ -548,7 +536,8 @@ async def process_documents(
     total_docs = len(processed_rows)
     saved_minutes = round(total_docs * 4.5)
 
-    page_html = f"""
+    # Standard string template using .format() to prevent f-string brace syntax errors
+    page_template = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -657,7 +646,7 @@ async def process_documents(
                             </tr>
                         </thead>
                         <tbody>
-                            {rows_html if rows_html else '<tr><td colspan="8" class="text-center py-4 bg-dark text-secondary">Нет документов для отображения</td></tr>'}
+                            {rows_html}
                         </tbody>
                     </table>
                 </div>
@@ -669,7 +658,6 @@ async def process_documents(
             </div>
         </div>
 
-        <!-- МОДАЛЬНОЕ ОКНО ДЛЯ ПРОСМОТРА ДЕТАЛЕЙ ДОКУМЕНТА -->
         <div class="modal fade" id="detailsModal" tabindex="-1" aria-labelledby="detailsModalLabel" aria-hidden="true">
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content bg-dark text-light border border-secondary">
@@ -687,19 +675,26 @@ async def process_documents(
           </div>
         </div>
 
-        <!-- Bootstrap JS Bundle -->
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-            function showDetails(jsonData, filename) {
+            function showDetails(jsonData, filename) {{
                 document.getElementById('detailsModalLabel').innerText = 'Детали документа: ' + filename;
                 document.getElementById('modalJsonContent').innerText = JSON.stringify(jsonData, null, 2);
                 var myModal = new bootstrap.Modal(document.getElementById('detailsModal'));
                 myModal.show();
-            }
+            }}
         </script>
     </body>
     </html>
     """
+
+    fallback_rows = '<tr><td colspan="8" class="text-center py-4 bg-dark text-secondary">Нет документов для отображения</td></tr>'
+    page_html = page_template.format(
+        rows_html=rows_html if rows_html else fallback_rows,
+        total_docs=total_docs,
+        saved_minutes=saved_minutes
+    )
+
     return HTMLResponse(content=page_html)
 
 
