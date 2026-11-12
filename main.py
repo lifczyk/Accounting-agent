@@ -20,7 +20,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="2.1.0")
+app = FastAPI(title="Accounting Agent", version="2.2.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -121,13 +121,11 @@ def validate_document_math(parsed_data: dict) -> list:
     try:
         positions = parsed_data.get("позиции", []) or parsed_data.get("услуги_позиции", []) or parsed_data.get("позиции_товаров", [])
         
-        # Считаем сумму по строкам
         calc_total = 0.0
         for p in positions:
             item_sum = float(p.get("всего_с_ндс", p.get("сумма", 0)) or 0)
             calc_total += item_sum
             
-        # Сравниваем с итогом
         itogo_block = parsed_data.get("итого", {})
         stated_total = float(itogo_block.get("всего_с_ндс", parsed_data.get("итого_оплата", calc_total)) or 0)
         
@@ -176,172 +174,4 @@ async def process_documents(
         for file in files:
             if file.filename:
                 file_path = os.path.join(UPLOAD_DIR, file.filename)
-                with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-                all_docs.append({"name": file.filename, "path": file_path})
-
-    batch_results = []
-
-    for doc in all_docs:
-        file_name = doc["name"]
-        file_path = doc["path"]
-        ai_response_text = "Ошибка распознавания."
-        doc_status = "Требует проверки"
-
-        content_parts = []
-        try:
-            if file_path.endswith('.pdf'):
-                doc_pdf = fitz.open(file_path)
-                for page_num in range(len(doc_pdf)):
-                    page = doc_pdf[page_num]
-                    pix = page.get_pixmap(dpi=150)
-                    img_bytes = pix.tobytes("jpeg")
-                    encoded_img = base64.b64encode(img_bytes).decode('utf-8')
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}
-                    })
-            elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                with open(file_path, "rb") as img_file:
-                    encoded_img = base64.b64encode(img_file.read()).decode('utf-8')
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}
-                    })
-            else:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    text_content = f.read()
-                    content_parts.append({"type": "text", "text": f"Текстовое содержимое:\n{text_content}"})
-        except Exception as e:
-            print(f"Ошибка подготовки файла {file_name}: {e}")
-
-        if not OPENROUTER_API_KEY:
-            batch_results.append({"filename": file_name, "status": "Ошибка", "result": "API ключ OpenRouter не задан."})
-            continue
-
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://aa.depot.by",
-            "X-Title": "Accounting Agent",
-            "Content-Type": "application/json"
-        }
-
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            try:
-                # 1. ШАГ КЛАССИФИКАЦИИ ДОКУМЕНТА
-                classifier_payload = {
-                    "model": GEMINI_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "Определи тип документа. Верни строго JSON вида: {\"type\": \"waybill\"} для накладных (ТН/ТТН), {\"type\": \"act\"} для актов услуг/работ/прав, либо {\"type\": \"receipt\"} для чеков."
-                        },
-                        {
-                            "role": "user",
-                            "content": [{"type": "text", "text": "Классифицируй этот документ:"}] + content_parts
-                        }
-                    ],
-                    "response_format": {"type": "json_object"}
-                }
-
-                class_resp = await client.post(OPENROUTER_URL, json=classifier_payload, headers=headers)
-                doc_type = "waybill"
-                if class_resp.status_code == 200:
-                    try:
-                        res_data = class_resp.json()
-                        content_json = json.loads(res_data["choices"][0]["message"]["content"])
-                        doc_type = content_json.get("type", "waybill")
-                    except:
-                        pass
-
-                # 2. ШАГ ИЗВЛЕЧЕНИЯ ДАННЫХ ПО СПЕЦИФИЦИРОВАННОМУ ПРОМПТУ
-                if doc_type == "waybill":
-                    prompt_text = (
-                        "Ты главный бухгалтер компаний ООО «Депо» и ООО «Датафилд» в РБ. "
-                        "Это Товарная накладная (ТН-2 / ТТН-1). Извлеки полные реквизиты, включая СЕРИЮ и НОМЕР, строго в JSON:\n"
-                        "{\n"
-                        '  "тип_документа": "ТН-2 / ТТН-1",\n'
-                        '  "серия_накладной": "...",\n'
-                        '  "номер_накладной": "...",\n'
-                        '  "дата_накладной": "ДД.ММ.ГГГГ",\n'
-                        '  "поставщик": {"наименование": "...", "унп": "..."},\n'
-                        '  "покупатель": {"наименование": "...", "унп": "..."},\n'
-                        '  "основание": "...",\n'
-                        '  "позиции": [{"наименование": "...", "количество": 0.0, "цена_за_единицу": 0.0, "сумма_без_ндс": 0.0, "ставка_ндс": "...", "сумма_ндс": 0.0, "всего_с_ндс": 0.0, "страна_происхождения": "...", "номер_гтд": "...", "счет_учета": "10/41/08"}],\n'
-                        '  "итого": {"сумма_без_ндс": 0.0, "сумма_ндс": 0.0, "всего_с_ндс": 0.0}\n'
-                        "}"
-                    )
-                elif doc_type == "act":
-                    prompt_text = (
-                        "Ты главный бухгалтер компаний ООО «Депо» и ООО «Датафилд» в РБ. "
-                        "Это Акт оказанных услуг / выполненных работ / передачи прав. Извлеки данные строго в JSON:\n"
-                        "{\n"
-                        '  "тип_документа": "Акт выполненных работ / оказанных услуг / передачи прав",\n'
-                        '  "номер_акта": "...",\n'
-                        '  "дата_акта": "ДД.ММ.ГГГГ",\n'
-                        '  "исполнитель": {"наименование": "...", "унп": "..."},\n'
-                        '  "заказчик": {"наименование": "...", "унп": "..."},\n'
-                        '  "основание_договор": "...",\n'
-                        '  "услуги_позиции": [{"наименование_услуги_или_прав": "...", "сумма_без_ндс": 0.0, "ставка_ндс": "...", "сумма_ндс": 0.0, "всего_с_ндс": 0.0, "счет_затрат": "20/26/44"}],\n'
-                        '  "итого": {"сумма_без_ндс": 0.0, "сумма_ндс": 0.0, "всего_с_ндс": 0.0}\n'
-                        "}"
-                    )
-                else:
-                    prompt_text = (
-                        "Ты бухгалтерский агент. Это Кассовый чек. Извлеки данные строго в JSON:\n"
-                        "{\n"
-                        '  "тип_документа": "Кассовый чек",\n'
-                        '  "номер_чека_или_фд": "...",\n'
-                        '  "дата_время": "...",\n'
-                        '  "продавец": {"наименование": "...", "унп": "..."},\n'
-                        '  "позиции_товаров": [{"наименование": "...", "количество": 0.0, "цена": 0.0, "сумма": 0.0}],\n'
-                        '  "итого_оплата": 0.0\n'
-                        "}"
-                    )
-
-                extraction_payload = {
-                    "model": GEMINI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": "Ты точный бухгалтерский ИИ. Возвращай результат исключительно в формате валидного JSON."},
-                        {"role": "user", "content": [{"type": "text", "text": prompt_text}] + content_parts}
-                    ],
-                    "response_format": {"type": "json_object"}
-                }
-
-                response = await client.post(OPENROUTER_URL, json=extraction_payload, headers=headers)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    ai_response_text = res_json["choices"][0]["message"]["content"]
-                    
-                    # 3. ШАГ ВАЛИДАЦИИ
-                    try:
-                        parsed_res = json.loads(ai_response_text)
-                        math_errors = validate_document_math(parsed_res)
-                        if math_errors:
-                            doc_status = "Ошибка матем."
-                            parsed_res["_validation_errors"] = math_errors
-                            ai_response_text = json.dumps(parsed_res, ensure_ascii=False, indent=2)
-                    except:
-                        pass
-                else:
-                    ai_response_text = f"Ошибка API ({response.status_code}): {response.text}"
-                    doc_status = "Ошибка"
-            except Exception as e:
-                ai_response_text = f"Ошибка сети: {str(e)}"
-                doc_status = "Ошибка"
-
-        batch_results.append({
-            "filename": file_name,
-            "status": doc_status,
-            "result": ai_response_text
-        })
-
-    return templates.TemplateResponse(request, "result.html", {
-        "batch_results": batch_results,
-        "total_processed": len(batch_results)
-    })
-
-@app.get("/api/export/excel")
-async def export_excel(_ = Depends(verify_session)):
-    filepath = export_processed_documents_to_excel()
-    return FileResponse(filepath, filename=filepath, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                with open(file_path, "wb") as
