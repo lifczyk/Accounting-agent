@@ -20,7 +20,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="3.2.1")
+app = FastAPI(title="Accounting Agent", version="3.2.2")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -536,7 +536,7 @@ async def process_documents(
     total_docs = len(processed_rows)
     saved_minutes = round(total_docs * 4.5)
 
-    # Standard string template using .format() to prevent f-string brace syntax errors
+    # Используем чистую строку без f- prefix, значения подставляем через .replace()
     page_template = """
     <!DOCTYPE html>
     <html lang="ru">
@@ -545,78 +545,78 @@ async def process_documents(
         <title>Accounting Agent — Реестр документов</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <style>
-            body {{
+            body {
                 background-color: #12151a;
                 color: #e6edf3;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            }}
-            .registry-card {{
+            }
+            .registry-card {
                 background-color: #1c2128;
                 border: 1px solid #30363d;
                 border-radius: 12px;
                 padding: 20px;
-            }}
-            .custom-table {{
+            }
+            .custom-table {
                 width: 100%;
                 border-collapse: collapse;
                 border-radius: 8px;
                 overflow: hidden;
-            }}
-            .custom-table thead th {{
+            }
+            .custom-table thead th {
                 background-color: #262c36;
                 color: #e6edf3;
                 font-weight: 600;
                 font-size: 0.9rem;
                 padding: 12px 14px;
                 border-bottom: 1px solid #373e47;
-            }}
-            .custom-table tbody td {{
+            }
+            .custom-table tbody td {
                 padding: 12px 14px;
                 border-bottom: 1px solid rgba(0, 0, 0, 0.12);
                 color: #1f2328;
-            }}
-            .row-ready {{
+            }
+            .row-ready {
                 background-color: #d6f0db;
-            }}
-            .row-ready:hover {{
+            }
+            .row-ready:hover {
                 background-color: #c8ead0;
-            }}
-            .row-error {{
+            }
+            .row-error {
                 background-color: #f4cccc;
-            }}
-            .row-error:hover {{
+            }
+            .row-error:hover {
                 background-color: #ebbcbc;
-            }}
-            .text-muted-dark {{
+            }
+            .text-muted-dark {
                 color: #424a53;
-            }}
-            .doc-badge {{
+            }
+            .doc-badge {
                 display: inline-block;
                 padding: 3px 10px;
                 border-radius: 999px;
                 font-size: 0.78rem;
                 font-weight: 600;
                 color: #fff;
-            }}
-            .badge-waybill {{ background-color: #3da35d; }}
-            .badge-act {{ background-color: #3b82f6; }}
-            .badge-receipt {{ background-color: #eab308; color: #1f2328; }}
-            .badge-err {{ background-color: #e05252; }}
-            .dark-select {{
+            }
+            .badge-waybill { background-color: #3da35d; }
+            .badge-act { background-color: #3b82f6; }
+            .badge-receipt { background-color: #eab308; color: #1f2328; }
+            .badge-err { background-color: #e05252; }
+            .dark-select {
                 background-color: #21262d;
                 color: #ffffff;
                 border: 1px solid #373e47;
                 border-radius: 6px;
                 font-size: 0.85rem;
-            }}
-            .dark-select:focus {{
+            }
+            .dark-select:focus {
                 background-color: #21262d;
                 color: #ffffff;
                 box-shadow: none;
                 border-color: #58a6ff;
-            }}
-            .status-ok {{ color: #1a7f37; }}
-            .status-err {{ color: #cf222e; cursor: help; }}
+            }
+            .status-ok { color: #1a7f37; }
+            .status-err { color: #cf222e; cursor: help; }
         </style>
     </head>
     <body class="p-4">
@@ -646,14 +646,14 @@ async def process_documents(
                             </tr>
                         </thead>
                         <tbody>
-                            {rows_html}
+                            __ROWS_HTML__
                         </tbody>
                     </table>
                 </div>
 
                 <div class="mt-3 pt-2 text-light small" style="line-height: 1.6;">
-                    <div>Результатов обработано в сессии: <strong>{total_docs}</strong></div>
-                    <div class="text-secondary">Эффективность: ~{saved_minutes} мин ручного ввода</div>
+                    <div>Результатов обработано в сессии: <strong>__TOTAL_DOCС__</strong></div>
+                    <div class="text-secondary">Эффективность: ~__SAVED_MINUTES__ мин ручного ввода</div>
                 </div>
             </div>
         </div>
@@ -677,22 +677,23 @@ async def process_documents(
 
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-            function showDetails(jsonData, filename) {{
+            function showDetails(jsonData, filename) {
                 document.getElementById('detailsModalLabel').innerText = 'Детали документа: ' + filename;
                 document.getElementById('modalJsonContent').innerText = JSON.stringify(jsonData, null, 2);
                 var myModal = new bootstrap.Modal(document.getElementById('detailsModal'));
                 myModal.show();
-            }}
+            }
         </script>
     </body>
     </html>
     """
 
     fallback_rows = '<tr><td colspan="8" class="text-center py-4 bg-dark text-secondary">Нет документов для отображения</td></tr>'
-    page_html = page_template.format(
-        rows_html=rows_html if rows_html else fallback_rows,
-        total_docs=total_docs,
-        saved_minutes=saved_minutes
+    page_html = (
+        page_template
+        .replace("__ROWS_HTML__", rows_html if rows_html else fallback_rows)
+        .replace("__TOTAL_DOCС__", str(total_docs))
+        .replace("__SAVED_MINUTES__", str(saved_minutes))
     )
 
     return HTMLResponse(content=page_html)
