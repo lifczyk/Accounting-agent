@@ -23,7 +23,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="3.8.1")
+app = FastAPI(title="Accounting Agent", version="4.0.0")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -34,7 +34,6 @@ templates = Jinja2Templates(directory="templates")
 UPLOAD_DIR = "/tmp/accounting_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Монтируем директорию загрузок для предпросмотра файлов
 app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
 
 DB_PATH = "accounting_journal.db"
@@ -67,7 +66,9 @@ SESSION_COOKIE_NAME = "session_token"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-GEMINI_MODEL = os.getenv("OPENROUTER_MODEL_EXTRACT", "google/gemini-2.5-flash-lite")
+
+# Переход на экономичную и эффективную модель Qwen через OpenRouter
+GEMINI_MODEL = os.getenv("OPENROUTER_MODEL_EXTRACT", "qwen/qwen-2.5-7b-instruct")
 
 
 class ChatQuery(BaseModel):
@@ -271,7 +272,7 @@ async def dashboard(
                         <div>
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h5 class="text-white m-0">📊 Операционный дашборд и ИИ-Ассистент</h5>
-                                <span class="badge bg-primary">OpenRouter API</span>
+                                <span class="badge bg-primary">OpenRouter (Qwen)</span>
                             </div>
                             <div class="row text-center g-2 mb-3">
                                 <div class="col-4">
@@ -294,7 +295,7 @@ async def dashboard(
                                 </div>
                             </div>
                             <div id="chatMessages" class="chat-box mb-2">
-                                <div class="text-muted">Ассистент: Задайте вопрос по базе, например: <em>«Выведи накладные за прошлый месяц»</em>.</div>
+                                <div class="text-muted">Ассистент: Задайте вопрос по базе, например: <em>«Сколько документов по компании Депо?»</em>.</div>
                             </div>
                         </div>
                         <div class="input-group input-group-sm">
@@ -308,7 +309,7 @@ async def dashboard(
             <div class="card p-4 shadow-sm">
                 <h5 class="text-white mb-3">📋 Журнал обработанных документов</h5>
                 
-                <form method="get" action="/" class="row g-3 mb-4 p-3 rounded border border-secondary bg-dark">
+                <form method="get" action="/" class="row g-3 mb-4 p-3 rounded border border-secondary bg-dark" id="filterForm">
                     <div class="col-md-3">
                         <label class="form-label text-secondary small">Дата документа (от - до):</label>
                         <div class="input-group input-group-sm">
@@ -325,11 +326,11 @@ async def dashboard(
                     </div>
                     <div class="col-md-2">
                         <label class="form-label text-secondary small">Контрагент (поиск):</label>
-                        <input type="text" name="counterparty" value="__VAL_COUNTERPARTY__" class="form-control form-control-sm" placeholder="Отправитель / Получатель">
+                        <input type="text" name="counterparty" id="filterCounterparty" value="__VAL_COUNTERPARTY__" class="form-control form-control-sm" placeholder="Отправитель / Получатель">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label text-secondary small">Тип документа:</label>
-                        <select name="doc_type" class="form-select form-select-sm">
+                        <select name="doc_type" id="filterDocType" class="form-select form-select-sm">
                             <option value="all" __SEL_ALL__>Все типы</option>
                             <option value="ТН" __SEL_TN__>Накладная (ТН/ТТН)</option>
                             <option value="Акт" __SEL_ACT__>Акт</option>
@@ -390,7 +391,12 @@ async def dashboard(
                     
                     document.getElementById(loadingId).remove();
                     if (response.ok) {
-                        chatBox.innerHTML += `<div class="mb-2 text-success"><strong>Ассистент:</strong> ${data.answer}</div>`;
+                        let htmlAnswer = `<div class="mb-2 text-success"><strong>Ассистент:</strong> ${data.answer}</div>`;
+                        if (data.filter_action && data.filter_action.counterparty) {
+                            const cp = data.filter_action.counterparty;
+                            htmlAnswer += `<div class="mb-2"><button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="applyAiFilter('${cp}')">🔍 Сформировать отчет по "${cp}" в журнале</button></div>`;
+                        }
+                        chatBox.innerHTML += htmlAnswer;
                     } else {
                         chatBox.innerHTML += `<div class="mb-2 text-danger"><strong>Ошибка:</strong> ${data.detail || 'Ошибка ответа'}</div>`;
                     }
@@ -399,6 +405,11 @@ async def dashboard(
                     chatBox.innerHTML += `<div class="mb-2 text-danger"><strong>Ошибка сети</strong></div>`;
                 }
                 chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            function applyAiFilter(counterparty) {
+                document.getElementById('filterCounterparty').value = counterparty;
+                document.getElementById('filterForm').submit();
             }
 
             document.getElementById('chatInput').addEventListener('keypress', function (e) {
@@ -431,7 +442,6 @@ async def process_documents(
     _=Depends(verify_session)
 ):
     all_docs = []
-
     if gdrive_link and gdrive_link.strip():
         drive_files = fetch_files_from_drive_folder(gdrive_link)
         all_docs.extend(drive_files)
@@ -445,7 +455,6 @@ async def process_documents(
                 all_docs.append({"name": file.filename, "path": file_path})
 
     processed_rows = []
-
     for index, doc in enumerate(all_docs, start=1):
         file_name = doc["name"]
         file_path = doc["path"]
@@ -906,7 +915,9 @@ async def ai_chat(query: ChatQuery, _=Depends(verify_session)):
 
     system_prompt = (
         "Ты профессиональный бухгалтерский ИИ-помощник. У тебя есть доступ к базе данных обработанных первичных документов. "
-        "Отвечай на вопросы пользователя четко, опираясь строго на представленные данные ниже.\n\n"
+        "Отвечай на вопросы пользователя четко. Если пользователь запрашивает документы конкретной компании, верни JSON в следующем формате: "
+        "{\"answer\": \"текст ответа\", \"filter_action\": {\"counterparty\": \"имя компании\"}}.\n"
+        "Если фильтр не нужен, возвращай просто ответ в текстовом поле или в JSON: {\"answer\": \"текст ответа\"}.\n\n"
         f"Данные документов в базе:\n{context_text}"
     )
 
@@ -922,7 +933,8 @@ async def ai_chat(query: ChatQuery, _=Depends(verify_session)):
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query.prompt}
-        ]
+        ],
+        "response_format": {"type": "json_object"}
     }
 
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -930,8 +942,15 @@ async def ai_chat(query: ChatQuery, _=Depends(verify_session)):
             resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
             if resp.status_code == 200:
                 res_data = resp.json()
-                answer = res_data["choices"][0]["message"]["content"]
-                return {"answer": answer}
+                content_str = res_data["choices"][0]["message"]["content"]
+                try:
+                    parsed_res = json.loads(content_str)
+                    return {
+                        "answer": parsed_res.get("answer", content_str),
+                        "filter_action": parsed_res.get("filter_action", None)
+                    }
+                except:
+                    return {"answer": content_str, "filter_action": None}
             else:
                 raise HTTPException(status_code=500, detail=f"OpenRouter API error: {resp.status_code}")
         except Exception as e:
