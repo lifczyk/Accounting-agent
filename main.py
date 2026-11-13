@@ -23,7 +23,7 @@ from store import DocumentStore
 from learning_db import LearningDatabase
 from export_excel import export_processed_documents_to_excel
 
-app = FastAPI(title="Accounting Agent", version="3.8.0")
+app = FastAPI(title="Accounting Agent", version="3.8.1")
 
 store = DocumentStore()
 learning_db = LearningDatabase()
@@ -218,7 +218,7 @@ async def dashboard(
         </tr>
         """
 
-    html_content = f"""
+    html_template = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -226,15 +226,15 @@ async def dashboard(
         <title>Accounting Agent — Главная</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <style>
-            body {{ background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-            .card {{ background-color: #161b22; border: 1px solid #30363d; color: #c9d1d9; border-radius: 10px; }}
-            .form-control, .form-select {{ background-color: #0d1117; border: 1px solid #30363d; color: #c9d1d9; }}
-            .form-control:focus, .form-select:focus {{ background-color: #0d1117; color: #c9d1d9; border-color: #58a6ff; box-shadow: none; }}
-            .custom-table {{ width: 100%; border-collapse: collapse; color: #c9d1d9; }}
-            .custom-table thead th {{ background-color: #21262d; border-bottom: 1px solid #30363d; padding: 10px; font-size: 0.85rem; }}
-            .custom-table tbody td {{ border-bottom: 1px solid #30363d; padding: 10px; }}
-            .metric-box {{ background-color: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 15px; }}
-            .chat-box {{ height: 210px; overflow-y: auto; background-color: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px; font-size: 0.85rem; }}
+            body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .card { background-color: #161b22; border: 1px solid #30363d; color: #c9d1d9; border-radius: 10px; }
+            .form-control, .form-select { background-color: #0d1117; border: 1px solid #30363d; color: #c9d1d9; }
+            .form-control:focus, .form-select:focus { background-color: #0d1117; color: #c9d1d9; border-color: #58a6ff; box-shadow: none; }
+            .custom-table { width: 100%; border-collapse: collapse; color: #c9d1d9; }
+            .custom-table thead th { background-color: #21262d; border-bottom: 1px solid #30363d; padding: 10px; font-size: 0.85rem; }
+            .custom-table tbody td { border-bottom: 1px solid #30363d; padding: 10px; }
+            .metric-box { background-color: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 15px; }
+            .chat-box { height: 210px; overflow-y: auto; background-color: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px; font-size: 0.85rem; }
         </style>
     </head>
     <body class="p-4">
@@ -247,7 +247,6 @@ async def dashboard(
                 </div>
             </div>
 
-            <!-- ВЕРХНИЙ БЛОК: ИСТОЧНИКИ СЛЕВА, ОПЕРАЦИОННЫЙ ДАШБОРД + AI СПРАВА -->
             <div class="row g-4 mb-4">
                 <div class="col-md-5">
                     <div class="card p-4 shadow-sm h-100">
@@ -306,7 +305,6 @@ async def dashboard(
                 </div>
             </div>
 
-            <!-- НИЖНИЙ БЛОК: ФИЛЬТРЫ И ЖУРНАЛ -->
             <div class="card p-4 shadow-sm">
                 <h5 class="text-white mb-3">📋 Журнал обработанных документов</h5>
                 
@@ -314,28 +312,28 @@ async def dashboard(
                     <div class="col-md-3">
                         <label class="form-label text-secondary small">Дата документа (от - до):</label>
                         <div class="input-group input-group-sm">
-                            <input type="date" name="date_from" value="{date_from or ''}" class="form-control">
-                            <input type="date" name="date_to" value="{date_to or ''}" class="form-control">
+                            <input type="date" name="date_from" value="__VAL_DATE_FROM__" class="form-control">
+                            <input type="date" name="date_to" value="__VAL_DATE_TO__" class="form-control">
                         </div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label text-secondary small">Дата обработки (от - до):</label>
                         <div class="input-group input-group-sm">
-                            <input type="date" name="proc_from" value="{proc_from or ''}" class="form-control">
-                            <input type="date" name="proc_to" value="{proc_to or ''}" class="form-control">
+                            <input type="date" name="proc_from" value="__VAL_PROC_FROM__" class="form-control">
+                            <input type="date" name="proc_to" value="__VAL_PROC_TO__" class="form-control">
                         </div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label text-secondary small">Контрагент (поиск):</label>
-                        <input type="text" name="counterparty" value="{counterparty or ''}" class="form-control form-control-sm" placeholder="Отправитель / Получатель">
+                        <input type="text" name="counterparty" value="__VAL_COUNTERPARTY__" class="form-control form-control-sm" placeholder="Отправитель / Получатель">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label text-secondary small">Тип документа:</label>
                         <select name="doc_type" class="form-select form-select-sm">
-                            <option value="all" {'selected' if not doc_type or doc_type == 'all' else ''}>Все типы</option>
-                            <option value="ТН" {'selected' if doc_type == 'ТН' else ''}>Накладная (ТН/ТТН)</option>
-                            <option value="Акт" {'selected' if doc_type == 'Акт' else ''}>Акт</option>
-                            <option value="Чек" {'selected' if doc_type == 'Чек' else ''}>Чек</option>
+                            <option value="all" __SEL_ALL__>Все типы</option>
+                            <option value="ТН" __SEL_TN__>Накладная (ТН/ТТН)</option>
+                            <option value="Акт" __SEL_ACT__>Акт</option>
+                            <option value="Чек" __SEL_REC__>Чек</option>
                         </select>
                     </div>
                     <div class="col-md-2 d-flex align-items-end gap-2">
@@ -359,7 +357,7 @@ async def dashboard(
                             </tr>
                         </thead>
                         <tbody>
-                            {journal_html if journal_html else '<tr><td colspan="8" class="text-center py-4 text-secondary">Нет данных в журнале по заданным фильтрам</td></tr>'}
+                            __JOURNAL_ROWS__
                         </tbody>
                     </table>
                 </div>
@@ -410,7 +408,19 @@ async def dashboard(
     </body>
     </html>
     """
-    return HTMLResponse(content=html_content)
+
+    rendered_html = html_template.replace("__VAL_DATE_FROM__", date_from or "") \
+                                 .replace("__VAL_DATE_TO__", date_to or "") \
+                                 .replace("__VAL_PROC_FROM__", proc_from or "") \
+                                 .replace("__VAL_PROC_TO__", proc_to or "") \
+                                 .replace("__VAL_COUNTERPARTY__", counterparty or "") \
+                                 .replace("__SEL_ALL__", "selected" if not doc_type or doc_type == 'all' else "") \
+                                 .replace("__SEL_TN__", "selected" if doc_type == 'ТН' else "") \
+                                 .replace("__SEL_ACT__", "selected" if doc_type == 'Акт' else "") \
+                                 .replace("__SEL_REC__", "selected" if doc_type == 'Чек' else "") \
+                                 .replace("__JOURNAL_ROWS__", journal_html if journal_html else '<tr><td colspan="8" class="text-center py-4 text-secondary">Нет данных в журнале по заданным фильтрам</td></tr>')
+
+    return HTMLResponse(content=rendered_html)
 
 
 @app.post("/process-documents", response_class=HTMLResponse)
@@ -580,12 +590,11 @@ async def process_documents(
             <td class="align-middle text-center">
                 <button class="btn btn-success btn-sm px-2 py-1" style="font-size: 0.8rem;" onclick='markProcessed({r["id"]}, "{r['filename']}")'>✅ Обработано</button>
             </td>
-            <!-- СКРЫТЫЕ ДАННЫЕ ДЛЯ РЕДАКТИРОВАНИЯ В МОДАЛЬНОМ ОКНЕ -->
             <div id="data-json-{r['id']}" style="display:none;">{json.dumps(r['parsed_data'], ensure_ascii=False)}</div>
         </tr>
         """
 
-    page_template = """
+    registry_template = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -630,14 +639,13 @@ async def process_documents(
                             </tr>
                         </thead>
                         <tbody id="registryTableBody">
-                            __ROWS_HTML__
+                            __REGISTRY_ROWS__
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
 
-        <!-- МОДАЛЬНОЕ ОКНО SPLIT VIEW -->
         <div class="modal fade" id="detailsModal" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content bg-dark text-light border border-secondary" style="height: 85vh;">
@@ -841,10 +849,9 @@ async def process_documents(
     </html>
     """
 
-    fallback_rows = '<tr><td colspan="8" class="text-center py-4 text-secondary">Нет документов для отображения</td></tr>'
-    page_html = page_template.replace("__ROWS_HTML__", rows_html if rows_html else fallback_rows)
+    rendered_registry = registry_template.replace("__REGISTRY_ROWS__", rows_html if rows_html else '<tr><td colspan="8" class="text-center py-4 text-secondary">Нет документов для отображения</td></tr>')
 
-    return HTMLResponse(content=page_html)
+    return HTMLResponse(content=rendered_registry)
 
 
 @app.post("/api/mark-processed")
@@ -872,7 +879,6 @@ async def mark_processed(payload: dict, _=Depends(verify_session)):
     conn.commit()
     conn.close()
 
-    # Ротация: удаление физического файла с диска сервера
     if filename:
         file_path = os.path.join(UPLOAD_DIR, filename)
         if os.path.exists(file_path):
